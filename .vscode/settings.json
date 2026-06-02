@@ -3,6 +3,9 @@
   "files.watcherExclude": {
     "**/.next/**": true
   },
+  "files.exclude": {
+    "**/.next": true
+  },
   "search.exclude": {
     "**/.next": true
   }
