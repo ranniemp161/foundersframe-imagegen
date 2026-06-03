@@ -1,7 +1,95 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
+
+const SESSION_KEY = "ff_session";
+const TOKEN_RE = /^[a-f0-9]{32}$/;
+
+function readSession(): string | null {
+  if (typeof window === "undefined") return null;
+  const t = window.localStorage.getItem(SESSION_KEY);
+  return t && TOKEN_RE.test(t) ? t : null;
+}
+
+function PasswordGate({ onUnlock }: { onUnlock: (token: string) => void }) {
+  const [password, setPassword] = useState("");
+  const [show, setShow] = useState(false);
+  const [error, setError] = useState("");
+  const [shake, setShake] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      if (!res.ok) {
+        setError("Incorrect password");
+        setShake(true);
+        setTimeout(() => setShake(false), 500);
+        setPassword("");
+        return;
+      }
+      const data = await res.json();
+      if (data?.token && TOKEN_RE.test(data.token)) {
+        onUnlock(data.token);
+      } else {
+        setError("Unexpected server response.");
+      }
+    } catch {
+      setError("Something went wrong. Try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="gate">
+      <form className={`gate-card ${shake ? "shake" : ""}`} onSubmit={submit}>
+        <div className="brand-mark gate-mark">FF</div>
+        <h1 className="gate-title">
+          FoundersFrame <span>Image Studio</span>
+        </h1>
+        <p className="gate-sub">Enter password to continue</p>
+
+        <div className="gate-input-wrap">
+          <input
+            className="gate-input"
+            type={show ? "text" : "password"}
+            placeholder="Password"
+            value={password}
+            autoFocus
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (error) setError("");
+            }}
+          />
+          <button
+            type="button"
+            className="gate-toggle"
+            onClick={() => setShow((s) => !s)}
+            aria-label={show ? "Hide password" : "Show password"}
+          >
+            {show ? "Hide" : "Show"}
+          </button>
+        </div>
+
+        {error && <div className="gate-error">{error}</div>}
+
+        <button className="btn btn-gold gate-btn" type="submit" disabled={submitting}>
+          {submitting ? "Unlocking…" : "Unlock"}
+        </button>
+      </form>
+    </div>
+  );
+}
 
 type Scene = {
   id: string;
@@ -34,6 +122,25 @@ function timestampToFilename(ts: string, i: number): string {
 }
 
 export default function Home() {
+  // Auth gate. `ready` avoids a flash of the gate before localStorage is read.
+  const [token, setToken] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    setToken(readSession());
+    setReady(true);
+  }, []);
+
+  const unlock = useCallback((t: string) => {
+    window.localStorage.setItem(SESSION_KEY, t);
+    setToken(t);
+  }, []);
+
+  const logout = useCallback(() => {
+    window.localStorage.removeItem(SESSION_KEY);
+    setToken(null);
+  }, []);
+
   const [srtName, setSrtName] = useState("");
   const [srtText, setSrtText] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -80,16 +187,61 @@ export default function Home() {
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-ff-token": token ?? "",
+        },
         body: JSON.stringify({
           srt: srtText,
           targetCount: targetCount === "" ? undefined : Number(targetCount),
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Analysis failed.");
-      setScenes(data.scenes);
-      setMeta(data.meta);
+
+      if (res.status === 401) {
+        logout();
+        throw new Error("Session expired. Please log in again.");
+      }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Analysis failed.");
+      }
+
+      const meta = {
+        durationMinutes: Number(res.headers.get("X-Meta-Duration") || 0),
+        suggestedCount: Number(res.headers.get("X-Meta-Suggested-Count") || 0),
+      };
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder();
+      let rawJson = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        rawJson += decoder.decode(value, { stream: true });
+      }
+      rawJson += decoder.decode();
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(rawJson.replace(/```json|```/g, "").trim());
+      } catch (err) {
+        throw new Error("Model returned unparseable output. Try again.");
+      }
+
+      const scenesList = (parsed.scenes ?? []).map((s: any, i: number) => ({
+        id: `scene-${i + 1}`,
+        timestamp: s.timestamp ?? "",
+        concept: s.concept ?? "",
+        needsText: Boolean(s.needsText),
+        textLabel: s.textLabel ?? "",
+        hasCharacter: Boolean(s.hasCharacter),
+        imagePrompt: s.imagePrompt ?? "",
+      }));
+
+      setScenes(scenesList);
+      setMeta(meta);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -106,9 +258,16 @@ export default function Home() {
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-ff-token": token ?? "",
+        },
         body: JSON.stringify({ scene, modelKey }),
       });
+      if (res.status === 401) {
+        logout();
+        throw new Error("Session expired. Please log in again.");
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed.");
       setImages((p) => ({ ...p, [scene.id]: { status: "done", dataUrl: data.dataUrl } }));
@@ -164,6 +323,10 @@ export default function Home() {
   );
   const activeModel = MODELS.find((m) => m.key === modelKey)!;
 
+  // Hold render until localStorage has been checked, then gate on the token.
+  if (!ready) return null;
+  if (!token) return <PasswordGate onUnlock={unlock} />;
+
   return (
     <div className="wrap">
       <div className="brand">
@@ -171,6 +334,18 @@ export default function Home() {
         <h1>
           FoundersFrame <span>Image Studio</span>
         </h1>
+        <button
+          className="lock-btn"
+          onClick={logout}
+          title="Log out"
+          aria-label="Log out"
+        >
+          {/* padlock glyph */}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="4" y="10" width="16" height="11" rx="2" stroke="currentColor" strokeWidth="2" />
+            <path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="2" />
+          </svg>
+        </button>
       </div>
       <p className="subtitle">
         Drop in a video transcript and get a full batch of on-brand explainer

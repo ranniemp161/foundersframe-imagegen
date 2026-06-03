@@ -3,13 +3,13 @@ import { HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { getGeminiClient, ANALYSIS_MODEL } from "@/lib/gemini";
 import { parseSrt, cuesToTranscript, totalDurationMs } from "@/lib/srt";
 import { buildAnalysisSystemPrompt } from "@/lib/style-preset";
+import { isAuthorized } from "@/lib/auth";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
-export const maxDuration = 60;
 
 export interface Scene {
   id: string;
@@ -23,6 +23,10 @@ export interface Scene {
 
 export async function POST(req: NextRequest) {
   try {
+    if (!isAuthorized(req)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const { srt, targetCount } = await req.json();
     if (!srt || typeof srt !== "string") {
       return NextResponse.json({ error: "No SRT content provided." }, { status: 400 });
@@ -36,8 +40,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Auto-suggest a count from video length if the caller didn't pin one:
-    // roughly ~6 images per minute, matching TJ's ~50 images / 8 min.
     const minutes = totalDurationMs(cues) / 60000;
     const count =
       typeof targetCount === "number" && targetCount > 0
@@ -47,10 +49,10 @@ export async function POST(req: NextRequest) {
     const transcript = cuesToTranscript(cues);
     const client = getGeminiClient();
 
-    let result: any;
+    let responseStream: any;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        result = await client.models.generateContent({
+        responseStream = await client.models.generateContentStream({
           model: ANALYSIS_MODEL,
           contents: [
             {
@@ -84,7 +86,7 @@ export async function POST(req: NextRequest) {
             ],
           },
         });
-        break; // Success, break out of retry loop
+        break;
       } catch (err: any) {
         const msg = err?.message ?? "";
         const retry = msg.includes("429") || msg.includes("503") || msg.includes("rate");
@@ -92,37 +94,42 @@ export async function POST(req: NextRequest) {
           await sleep(2000 * attempt);
           continue;
         }
-        throw err; // If it's not a retryable error or we exhausted attempts, bubble it up
+        throw err;
       }
     }
 
-    const raw = result.text ?? "";
-    let parsed: { scenes?: Omit<Scene, "id">[] };
-    try {
-      parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
-    } catch {
-      return NextResponse.json(
-        { error: "Model returned unparseable output. Try again." },
-        { status: 502 }
-      );
+    if (!responseStream) {
+      throw new Error("Failed to initialize stream.");
     }
 
-    const scenes: Scene[] = (parsed.scenes ?? []).map((s, i) => ({
-      id: `scene-${i + 1}`,
-      timestamp: s.timestamp ?? "",
-      concept: s.concept ?? "",
-      needsText: Boolean(s.needsText),
-      textLabel: s.textLabel ?? "",
-      hasCharacter: Boolean(s.hasCharacter),
-      imagePrompt: s.imagePrompt ?? "",
-    }));
+    const meta = {
+      cueCount: cues.length,
+      durationMinutes: Math.round(minutes * 10) / 10,
+      suggestedCount: count,
+    };
 
-    return NextResponse.json({
-      scenes,
-      meta: {
-        cueCount: cues.length,
-        durationMinutes: Math.round(minutes * 10) / 10,
-        suggestedCount: count,
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const chunk of responseStream) {
+            if (chunk.text) {
+              controller.enqueue(encoder.encode(chunk.text));
+            }
+          }
+          controller.close();
+        } catch (err: any) {
+          controller.error(err);
+        }
+      }
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/json",
+        "X-Meta-Cue-Count": meta.cueCount.toString(),
+        "X-Meta-Duration": meta.durationMinutes.toString(),
+        "X-Meta-Suggested-Count": meta.suggestedCount.toString(),
       },
     });
   } catch (err: any) {

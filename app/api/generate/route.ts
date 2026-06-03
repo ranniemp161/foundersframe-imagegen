@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildImagePrompt } from "@/lib/style-preset";
+import { isAuthorized } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -12,6 +13,10 @@ async function sleep(ms: number) {
 
 export async function POST(req: NextRequest) {
   try {
+    if (!isAuthorized(req)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const hfKey = process.env.HF_API_KEY;
     if (!hfKey) {
       return NextResponse.json(
