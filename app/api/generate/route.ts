@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getGeminiClient, resolveImageModelId } from "@/lib/gemini";
 import { buildImagePrompt } from "@/lib/style-preset";
 import { isAuthorized } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
-const HF_MODEL = "black-forest-labs/FLUX.1-schnell";
-
-async function sleep(ms: number) {
+function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
@@ -17,17 +16,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const hfKey = process.env.HF_API_KEY;
-    if (!hfKey) {
-      return NextResponse.json(
-        { error: "HF_API_KEY is missing in .env.local" },
-        { status: 400 }
-      );
-    }
-
     const { scene, modelKey } = await req.json();
     if (!scene?.imagePrompt) {
-      return NextResponse.json({ error: "Missing scene prompt." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing scene prompt." },
+        { status: 400 }
+      );
     }
 
     const finalPrompt = buildImagePrompt({
@@ -37,60 +31,63 @@ export async function POST(req: NextRequest) {
       hasCharacter: Boolean(scene.hasCharacter),
     });
 
-    // Hugging Face Inference API — returns raw image bytes directly.
+    const client = getGeminiClient();
+    const modelId = resolveImageModelId(modelKey);
+
+    // Auto retry on 429/503 with backoff
+    let lastError = "";
     for (let attempt = 1; attempt <= 3; attempt++) {
-      const res = await fetch(
-        `https://router.huggingface.co/hf-inference/models/${HF_MODEL}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${hfKey.trim()}`,
-            "Content-Type": "application/json",
-            "x-wait-for-model": "true",
+      try {
+        const result = await client.models.generateContent({
+          model: modelId,
+          contents: [{ role: "user", parts: [{ text: finalPrompt }] }],
+          config: {
+            responseModalities: ["IMAGE", "TEXT"],
           },
-          body: JSON.stringify({
-            inputs: finalPrompt,
-            parameters: {
-              width: 1280,
-              height: 720,
-              num_inference_steps: 4,
+        });
+
+        const parts = result.candidates?.[0]?.content?.parts ?? [];
+        const imagePart = parts.find((p: any) => p.inlineData?.data);
+
+        if (!imagePart?.inlineData?.data) {
+          const textPart = parts.find((p: any) => p.text)?.text;
+          return NextResponse.json(
+            {
+              error:
+                textPart ||
+                "No image returned. Try rephrasing the prompt.",
             },
-          }),
+            { status: 502 }
+          );
         }
-      );
 
-      // 503 = model is loading, retry after a few seconds.
-      if (res.status === 503) {
-        if (attempt < 3) { await sleep(5000 * attempt); continue; }
-        return NextResponse.json(
-          { error: "Model is loading, please try again in 30 seconds." },
-          { status: 503 }
-        );
+        const mime = imagePart.inlineData.mimeType ?? "image/png";
+        return NextResponse.json({
+          id: scene.id,
+          dataUrl: `data:${mime};base64,${imagePart.inlineData.data}`,
+        });
+      } catch (err: any) {
+        lastError = err?.message ?? "Unknown error";
+        const isRetryable =
+          lastError.includes("429") ||
+          lastError.includes("503") ||
+          lastError.includes("rate") ||
+          lastError.includes("quota") ||
+          lastError.includes("unavailable");
+
+        if (isRetryable && attempt < 3) {
+          await sleep(4000 * attempt);
+          continue;
+        }
+        break;
       }
-
-      if (!res.ok) {
-        const errText = await res.text();
-        console.error(`[HF ERROR] Status: ${res.status} | Body: ${errText}`);
-        return NextResponse.json(
-          { error: `Hugging Face error ${res.status}: ${errText}` },
-          { status: 500 }
-        );
-      }
-
-      // Response is raw image bytes — convert to base64.
-      const buffer = await res.arrayBuffer();
-      const base64 = Buffer.from(buffer).toString("base64");
-      const mime = res.headers.get("content-type") || "image/jpeg";
-
-      return NextResponse.json({
-        id: scene.id,
-        dataUrl: `data:${mime};base64,${base64}`,
-      });
     }
 
-    return NextResponse.json({ error: "Generation failed after retries." }, { status: 500 });
+    return NextResponse.json(
+      { error: lastError || "Generation failed." },
+      { status: 500 }
+    );
   } catch (err: any) {
-    console.error("[GENERATE ERROR]:", err);
     return NextResponse.json(
       { error: err?.message ?? "Generation failed." },
       { status: 500 }

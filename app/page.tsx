@@ -196,25 +196,18 @@ type ImgState = {
 
 const MODELS = [
   {
-    key: "flux_schnell",
-    label: "Flux Schnell",
-    priceNote: "~$0.003 / image",
-    price: 0.003,
-    desc: "Fastest turnaround — best for testing batches.",
+    key: "nano_banana",
+    label: "Nano Banana",
+    priceNote: "~$0.039 / image",
+    price: 0.039,
+    desc: "Fast · great quality for everyday batches.",
   },
   {
-    key: "flux_dev",
-    label: "Flux Dev",
-    priceNote: "~$0.025 / image",
-    price: 0.025,
-    desc: "Balanced quality and speed for most runs.",
-  },
-  {
-    key: "flux_pro",
-    label: "Flux Pro",
-    priceNote: "~$0.05 / image",
-    price: 0.05,
-    desc: "Highest fidelity for final, polished output.",
+    key: "nano_banana_pro",
+    label: "Nano Banana Pro",
+    priceNote: "~$0.134 / image",
+    price: 0.134,
+    desc: "Best text rendering + character consistency.",
   },
 ];
 
@@ -253,7 +246,7 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
 
   const [targetCount, setTargetCount] = useState<number | "">("");
-  const [modelKey, setModelKey] = useState("flux_schnell");
+  const [modelKey, setModelKey] = useState("nano_banana");
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [meta, setMeta] = useState<{ durationMinutes: number; suggestedCount: number } | null>(null);
   const [images, setImages] = useState<Record<string, ImgState>>({});
@@ -268,6 +261,7 @@ export default function Home() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [genTotal, setGenTotal] = useState(0);
   const [totalGenerated, setTotalGenerated] = useState(0);
+  const [previewId, setPreviewId] = useState<string | null>(null);
 
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -444,6 +438,26 @@ export default function Home() {
     a.click();
     URL.revokeObjectURL(url);
   }
+
+  function downloadOne(scene: Scene) {
+    const img = images[scene.id];
+    if (img?.status !== "done" || !img.dataUrl) return;
+    const i = scenes.findIndex((s) => s.id === scene.id);
+    const a = document.createElement("a");
+    a.href = img.dataUrl;
+    a.download = timestampToFilename(scene.timestamp, i < 0 ? 0 : i);
+    a.click();
+  }
+
+  // Close the preview on Escape.
+  useEffect(() => {
+    if (!previewId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPreviewId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [previewId]);
 
   const doneCount = useMemo(
     () => Object.values(images).filter((i) => i.status === "done").length,
@@ -802,16 +816,15 @@ export default function Home() {
                           )}
 
                           {img.status === "done" && (
-                            <div className="thumb-overlay">
-                              <button
-                                className="icon-btn regen"
-                                onClick={() => generateOne(s)}
-                                title="Regenerate"
-                              >
-                                ↻ Regenerate
-                              </button>
-                              <p className="overlay-concept">{s.concept}</p>
-                            </div>
+                            <button
+                              type="button"
+                              className="thumb-overlay"
+                              onClick={() => setPreviewId(s.id)}
+                              title="Click to preview"
+                            >
+                              <span className="overlay-zoom">⤢ Preview</span>
+                              <span className="overlay-concept">{s.concept}</span>
+                            </button>
                           )}
                         </div>
                         <div className="info">
@@ -826,6 +839,58 @@ export default function Home() {
             )}
           </div>
         </div>
+
+        {/* ============ PREVIEW LIGHTBOX ============ */}
+        {(() => {
+          if (!previewId) return null;
+          const scene = scenes.find((s) => s.id === previewId);
+          const img = scene ? images[scene.id] : undefined;
+          if (!scene || img?.status !== "done" || !img.dataUrl) return null;
+          return (
+            <div
+              className="lightbox"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => setPreviewId(null)}
+            >
+              <div className="lightbox-card" onClick={(e) => e.stopPropagation()}>
+                <button
+                  className="lightbox-close"
+                  onClick={() => setPreviewId(null)}
+                  aria-label="Close preview"
+                >
+                  ×
+                </button>
+                <div className="lightbox-img-wrap">
+                  <img src={img.dataUrl} alt={scene.concept} className="lightbox-img" />
+                </div>
+                <div className="lightbox-info">
+                  <div className="lightbox-meta">
+                    <span className="ts">{scene.timestamp}</span>
+                    <span className="lightbox-concept">{scene.concept}</span>
+                  </div>
+                  {scene.imagePrompt && (
+                    <p className="lightbox-prompt">{scene.imagePrompt}</p>
+                  )}
+                  <div className="lightbox-actions">
+                    <button className="btn btn-gold" onClick={() => downloadOne(scene)}>
+                      ⬇ Download image
+                    </button>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => {
+                        setPreviewId(null);
+                        generateOne(scene);
+                      }}
+                    >
+                      ↻ Regenerate
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </main>
     </div>
   );

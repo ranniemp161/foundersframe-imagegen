@@ -902,26 +902,130 @@ body {
 .thumb-overlay {
   position: absolute;
   inset: 0;
+  width: 100%;
   padding: 12px;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: flex-start;
+  text-align: left;
+  border: none;
+  cursor: pointer;
   background: linear-gradient(to top, rgba(0, 0, 0, 0.85), transparent 70%);
   opacity: 0;
   transition: opacity 0.2s var(--ease);
+  font: inherit;
 }
 .card:hover .thumb-overlay {
   opacity: 1;
+}
+.overlay-zoom {
+  align-self: center;
+  margin-top: auto;
+  margin-bottom: auto;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
 }
 .overlay-concept {
   font-size: 12.5px;
   line-height: 1.4;
   color: #fff;
 }
-.icon-btn.regen {
+
+/* ---------- preview lightbox ---------- */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(6px);
+  animation: fadeIn 0.18s var(--ease);
+}
+.lightbox-card {
+  position: relative;
+  width: 100%;
+  max-width: 880px;
+  max-height: 90vh;
+  overflow: hidden auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  animation: lightboxIn 0.2s var(--ease);
+}
+@keyframes lightboxIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.lightbox-close {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.lightbox-close:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.lightbox-img-wrap {
+  background: #000;
+  display: grid;
+  place-items: center;
+}
+.lightbox-img {
+  width: 100%;
+  max-height: 64vh;
+  object-fit: contain;
+  display: block;
+}
+.lightbox-info {
+  padding: 18px 22px 22px;
+}
+.lightbox-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.lightbox-concept {
+  font-size: 15px;
+  font-weight: 700;
+}
+.lightbox-prompt {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+  margin-bottom: 18px;
+  white-space: pre-wrap;
+}
+.lightbox-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .loading-state,
