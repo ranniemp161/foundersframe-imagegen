@@ -4,7 +4,7 @@
 
 export const FOUNDERSFRAME_STYLE = `
 FoundersFrame explainer style. A clean modern whiteboard-animation / motion-graphic look:
-- Background: clean solid white (#FFFFFF) only. No gradients, no textures, no shadows, no vignette behind the main subject. The white must be pure and flat so background removal tools can cleanly isolate the subject.
+- Background: solid chroma key green (#00FF00) only. Pure flat green, no gradients, no shadows, no textures. This is intentional — the green background will be removed in post production using color keying. Do NOT use green on any other element in the image. All icons, characters, text, arrows and graphic elements must use non-green colors only.
 - Icons & objects: hand-drawn line-art with dark navy-charcoal outlines (#2D3142), light interior fills, subtle shading. Confident marker-style strokes, slightly imperfect, friendly.
 - Accent colour: a single warm gold/yellow (#E8C547) used sparingly for highlights, arrows, flags, glows, or one key element. Occasional muted red (#E84747) accent only when it carries meaning.
 - Composition: ONE clear idea per image, generous negative space, centred or simple left-to-right flow. Arrows (dashed or solid, hand-drawn) to show movement or cause-and-effect.
@@ -72,7 +72,7 @@ export function buildImagePrompt(opts: {
 
   parts.push(FOUNDERSFRAME_STYLE);
   parts.push(
-    `Compose the subject on the RIGHT side of the frame, centered vertically, occupying roughly 50-60% of the width. Leave the LEFT side completely empty white space. This graphic will sit beside a presenter on screen who occupies the left half.`
+    `Compose the subject on the RIGHT side of the frame, centered vertically, occupying roughly 50-60% of the width. Leave the LEFT side completely empty green space. This graphic will sit beside a presenter on screen who occupies the left half.`
   );
 
   return parts.join("\n\n");
