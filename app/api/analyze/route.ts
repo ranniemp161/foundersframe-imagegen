@@ -1,3 +1,8 @@
+// Route segment config MUST come first so Vercel resolves the Node.js runtime
+// (60s cap) instead of silently falling back to Edge (25s cap).
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 import { NextRequest, NextResponse } from "next/server";
 import { HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { getGeminiClient, ANALYSIS_MODEL } from "@/lib/gemini";
@@ -5,7 +10,8 @@ import { parseSrt, cuesToTranscript, totalDurationMs } from "@/lib/srt";
 import { buildAnalysisSystemPrompt } from "@/lib/style-preset";
 import { isAuthorized } from "@/lib/auth";
 
-export const runtime = "edge";
+// Cap transcript size so an oversized SRT can't push the Gemini call past the limit.
+const MAX_TRANSCRIPT_CHARS = 30000;
 
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -46,7 +52,7 @@ export async function POST(req: NextRequest) {
         ? targetCount
         : Math.max(8, Math.round(minutes * 6));
 
-    const transcript = cuesToTranscript(cues);
+    const transcript = cuesToTranscript(cues).slice(0, MAX_TRANSCRIPT_CHARS);
     const client = getGeminiClient();
 
     let responseStream: any;
@@ -91,7 +97,7 @@ export async function POST(req: NextRequest) {
         const msg = err?.message ?? "";
         const retry = msg.includes("429") || msg.includes("503") || msg.includes("rate");
         if (retry && attempt < 3) {
-          await sleep(2000 * attempt);
+          await sleep(1000 * attempt);
           continue;
         }
         throw err;
