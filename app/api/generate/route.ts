@@ -31,6 +31,13 @@ export async function POST(req: NextRequest) {
       hasCharacter: Boolean(scene.hasCharacter),
     });
 
+    // Gemini's image API has no direct size parameter — the desired output
+    // dimensions must be requested through the prompt text itself.
+    const sizedPrompt = finalPrompt + "\n\nIMPORTANT: " +
+      "Generate this as a 960x1080 portrait image " +
+      "(half of a 1920x1080 HD frame). Subject on right " +
+      "side, empty white space on left side.";
+
     const client = getGeminiClient();
     const modelId = resolveImageModelId(modelKey);
 
@@ -40,7 +47,7 @@ export async function POST(req: NextRequest) {
       try {
         const result = await client.models.generateContent({
           model: modelId,
-          contents: [{ role: "user", parts: [{ text: finalPrompt }] }],
+          contents: [{ role: "user", parts: [{ text: sizedPrompt }] }],
           config: {
             responseModalities: ["IMAGE", "TEXT"],
           },

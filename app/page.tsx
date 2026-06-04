@@ -216,9 +216,51 @@ const CONCURRENCY = 2;
 
 const STEP_TITLES = ["Upload Transcript", "Settings", "Review Prompts", "Results"];
 
-function timestampToFilename(ts: string, i: number): string {
-  const safe = ts.replace(/[^0-9]/g, "") || String(i + 1).padStart(3, "0");
-  return `ff_${String(i + 1).padStart(2, "0")}_${safe}.png`;
+// Helper to convert timestamp string to ms
+function parseTimestampMs(ts: string): number {
+  const parts = ts.split(":").map(Number);
+  return parts.length === 3
+    ? (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000
+    : (parts[0] * 60 + (parts[1] || 0)) * 1000;
+}
+
+// Helper to format ms back to display timecode
+function msToTimecode(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0
+    ? `${pad(h)}:${pad(m)}:${pad(s)}`
+    : `${pad(m)}:${pad(s)}`;
+}
+
+function timestampToFilename(scene: Scene, index: number): string {
+  // Convert "05:18" or "01:23:45" to milliseconds
+  const parts = scene.timestamp.split(":").map(Number);
+  const totalMs =
+    parts.length === 3
+      ? (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000
+      : (parts[0] * 60 + (parts[1] || 0)) * 1000;
+
+  // Default display duration 5 seconds
+  const durationMs = 5000;
+
+  // Slugify concept for human readability
+  const slug = scene.concept
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40);
+
+  const seq = String(index + 1).padStart(2, "0");
+  const ts = String(totalMs).padStart(8, "0");
+  const dur = String(durationMs).padStart(5, "0");
+
+  // Format: ff_[seq]_[timestamp_ms]_[duration_ms]_[concept-slug].png
+  // Example: ff_01_00053000_05000_storytelling-builds-trust.png
+  return `ff_${seq}_${ts}_${dur}_${slug}.png`;
 }
 
 export default function Home() {
@@ -418,18 +460,86 @@ export default function Home() {
       const img = images[s.id];
       if (img?.status === "done" && img.dataUrl) {
         const base64 = img.dataUrl.split(",")[1];
-        zip.file(timestampToFilename(s.timestamp, i), base64, { base64: true });
+        zip.file(timestampToFilename(s, i), base64, { base64: true });
       }
     });
     // Drop a manifest so the prompts travel with the images into Hyperframes.
-    const manifest = scenes.map((s, i) => ({
-      file: timestampToFilename(s.timestamp, i),
-      timestamp: s.timestamp,
-      concept: s.concept,
-      textLabel: s.textLabel,
-      prompt: s.imagePrompt,
-    }));
+    const manifest = {
+      version: "1.0",
+      project: srtName.replace(/\.srt$/i, ""),
+      generated_at: new Date().toISOString(),
+      total_images: scenes.filter(
+        (s) => images[s.id]?.status === "done"
+      ).length,
+      fps: 30,
+      frame_width: 1920,
+      frame_height: 1080,
+      asset_width: 960,
+      asset_height: 1080,
+      asset_position: "right",
+      timeline: scenes
+        .filter((s) => images[s.id]?.status === "done")
+        .map((s, i) => {
+          const timestampMs = parseTimestampMs(s.timestamp);
+          const durationMs = 5000;
+          return {
+            sequence: i + 1,
+            file: timestampToFilename(s, i),
+            timestamp_ms: timestampMs,
+            timestamp_display: msToTimecode(timestampMs),
+            duration_ms: durationMs,
+            duration_display: "0:05",
+            frame_in: Math.round((timestampMs / 1000) * 30),
+            frame_out: Math.round(
+              ((timestampMs + durationMs) / 1000) * 30
+            ),
+            concept: s.concept,
+            text_label: s.textLabel || "",
+            has_character: s.hasCharacter,
+            prompt: s.imagePrompt,
+            placement: {
+              x: 960,
+              y: 0,
+              width: 960,
+              height: 1080,
+              anchor: "top-right",
+            },
+          };
+        }),
+    };
+
     zip.file("manifest.json", JSON.stringify(manifest, null, 2));
+
+    zip.file(
+      "IMPORT_INSTRUCTIONS.txt",
+      `FOUNDERSFRAME IMAGE BATCH
+Generated: ${new Date().toLocaleString()}
+Total images: ${manifest.total_images}
+
+FILENAME FORMAT:
+ff_[sequence]_[timestamp_ms]_[duration_ms]_[concept].png
+
+HOW TO USE IN HYPERFRAMES:
+1. Import all PNG files into your media bin
+2. Each filename contains the exact timeline position
+   - timestamp_ms = where to place it on the timeline
+   - duration_ms = how long to show it (default 5000ms)
+3. Place each asset at the RIGHT side of the 1920x1080 frame
+   - X position: 960
+   - Y position: 0
+   - Width: 960, Height: 1080
+4. Use Hyperframes background removal on each clip
+5. The manifest.json contains full placement data
+   for automated import if Hyperframes supports JSON import
+
+EXAMPLE:
+ff_01_00053000_05000_storytelling-builds-trust.png
+→ Sequence 1
+→ Place at 0:53 on timeline
+→ Show for 5 seconds
+→ Concept: storytelling builds trust
+`
+    );
     const blob = await zip.generateAsync({ type: "blob" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -445,7 +555,7 @@ export default function Home() {
     const i = scenes.findIndex((s) => s.id === scene.id);
     const a = document.createElement("a");
     a.href = img.dataUrl;
-    a.download = timestampToFilename(scene.timestamp, i < 0 ? 0 : i);
+    a.download = timestampToFilename(scene, i < 0 ? 0 : i);
     a.click();
   }
 
