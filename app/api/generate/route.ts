@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { scene, modelKey } = await req.json();
+    const { scene, modelKey, channel } = await req.json();
     if (!scene?.imagePrompt) {
       return NextResponse.json(
         { error: "Missing scene prompt." },
@@ -24,19 +24,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const channelName = channel === "subishop" ? "subishop" : "foundersframe";
+
     const finalPrompt = buildImagePrompt({
       imagePrompt: scene.imagePrompt,
       needsText: Boolean(scene.needsText),
       textLabel: scene.textLabel ?? "",
       hasCharacter: Boolean(scene.hasCharacter),
+      channel: channelName,
     });
 
     // Gemini's image API has no direct size parameter — the desired output
     // dimensions must be requested through the prompt text itself.
     const sizedPrompt = finalPrompt + "\n\nIMPORTANT: " +
-      "Generate this as a 960x1080 portrait image " +
-      "(half of a 1920x1080 HD frame). Subject on right " +
-      "side, empty white space on left side.";
+      (channelName === "subishop"
+        ? "Generate this as a 1920x1080 landscape image (16:9 aspect ratio). Center the subject in the frame, surrounded by a clean, solid, flat neutral background."
+        : "Generate this as a 960x1080 portrait image (half of a 1920x1080 HD frame). Subject on right side, empty white space on left side.");
 
     const client = getGeminiClient();
     const modelId = resolveImageModelId(modelKey);

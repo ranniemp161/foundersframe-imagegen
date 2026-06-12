@@ -33,10 +33,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { srt, targetCount } = await req.json();
+    const { srt, targetCount, channel } = await req.json();
     if (!srt || typeof srt !== "string") {
       return NextResponse.json({ error: "No SRT content provided." }, { status: 400 });
     }
+
+    const channelName = channel === "subishop" ? "subishop" : "foundersframe";
 
     const cues = parseSrt(srt);
     if (cues.length === 0) {
@@ -50,6 +52,8 @@ export async function POST(req: NextRequest) {
     const count =
       typeof targetCount === "number" && targetCount > 0
         ? targetCount
+        : channelName === "subishop"
+        ? Math.max(3, Math.round(minutes * 1.5))
         : Math.max(8, Math.round(minutes * 6));
 
     const transcript = cuesToTranscript(cues).slice(0, MAX_TRANSCRIPT_CHARS);
@@ -64,7 +68,7 @@ export async function POST(req: NextRequest) {
             {
               role: "user",
               parts: [
-                { text: buildAnalysisSystemPrompt(count) },
+                { text: buildAnalysisSystemPrompt(count, channelName) },
                 { text: `\n\nTRANSCRIPT:\n${transcript}` },
               ],
             },

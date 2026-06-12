@@ -13,6 +13,17 @@ FoundersFrame explainer style. A clean modern whiteboard-animation / motion-grap
 - NO photo-realism for icons, NO busy backgrounds, NO clutter, NO drop-shadow-heavy 3D, NO stock-photo look.
 `.trim();
 
+export const SUBISHOP_STYLE = `
+Subi Shop infographic and B-roll style. A clean modern 2D vector infographic look:
+- Background: a solid, clean, neutral background color (like off-white, light grey, soft pastel, or dark slate/charcoal) that best complements the subject matter. Keep it completely flat, plain, and solid. No complex gradients, no busy textures, no photographic details, and no green screen.
+- Graphics & objects: flat 2D vector style. Clean digital shapes with NO hand-drawn marker-style borders, outlines, or sketch strokes. Focus on sharp, clean visual geometry.
+- Composition: ONE clear conceptual idea or data visualization per image, centered, with balanced negative space. Use clean graphic charts, timelines, maps, educational diagrams, flowcharts, or abstract symbolism.
+- Color Palette: clean, harmonious, modern professional colors that contrast cleanly with the chosen background.
+- Text labels (when present): clean, highly legible modern sans-serif typography. Keep text short (1-3 words) and clearly integrated into the layout.
+- Overall feel: Educational, documentary, professional visual explanations. Clean and clear presentation to complement a speaker's voiceover.
+- NO hand-drawn doodles, NO photo-realism, NO busy or textured backgrounds.
+`.trim();
+
 // Some images use a semi-realistic cartoon CHARACTER (see the green-jacket avatar frame).
 // When the scene calls for a person/founder figure, this modifier is added.
 export const CHARACTER_MODIFIER = `
@@ -22,7 +33,30 @@ off-white background — consistent with a recurring brand mascot, not a photogr
 `.trim();
 
 // The system instruction that turns a transcript into image prompts.
-export function buildAnalysisSystemPrompt(targetCount: number): string {
+export function buildAnalysisSystemPrompt(targetCount: number, channel: string): string {
+  if (channel === "subishop") {
+    return `
+You are the visual director for "Subi Shop", a YouTube channel featuring talking-head educational and documentary content. Your job: read a video transcript and select the moments that most deserve a supporting graphic (B-roll/infographics), then write a ready-to-use image-generation prompt for each.
+
+EDITORIAL RULES (important):
+- Select roughly ${targetCount} moments — only when a visual genuinely ADDS clarity, visual proof, or symbolic punch to the speaker's words. Do NOT fill every moment. B-roll only appears when necessary (e.g. key concepts, statistics, comparisons, abstract metaphors, or structures).
+- Spread selections across the whole video, not clustered at the start.
+- Each graphic must express ONE idea.
+- Keep any on-image TEXT to 1-3 words maximum (a label or key data point, not a sentence).
+
+For each selected moment return:
+- "timestamp": the [mm:ss] from the transcript where the visual should appear.
+- "concept": 3-6 word summary of the idea.
+- "needsText": true/false — does the graphic need a word/label baked in?
+- "textLabel": the 1-3 word label if needsText is true, else "".
+- "hasCharacter": false (Subi Shop focuses purely on abstract icons/infographics, set to false).
+- "imagePrompt": a vivid, concrete prompt describing exactly what to draw (subjects, layout, charts, clean vector shapes). Describe the SCENE only — do NOT restate the art style, that is added automatically. Do NOT name real people; describe figures generically.
+
+Return STRICT JSON only, no markdown, no commentary:
+{ "scenes": [ { "timestamp": "...", "concept": "...", "needsText": false, "textLabel": "", "hasCharacter": false, "imagePrompt": "..." } ] }
+`.trim();
+  }
+
   return `
 You are the visual director for "FoundersFrame", a YouTube channel hosted by TJ — business and startup
 explainer content. Your job: read a video transcript and select the moments that most deserve a
@@ -57,6 +91,7 @@ export function buildImagePrompt(opts: {
   needsText: boolean;
   textLabel: string;
   hasCharacter: boolean;
+  channel?: string;
 }): string {
   const parts: string[] = [opts.imagePrompt];
 
@@ -68,12 +103,23 @@ export function buildImagePrompt(opts: {
     parts.push(`Do not add any text or words to the image.`);
   }
 
-  if (opts.hasCharacter) parts.push(CHARACTER_MODIFIER);
+  const isSubi = opts.channel === "subishop";
 
-  parts.push(FOUNDERSFRAME_STYLE);
-  parts.push(
-    `Compose the subject on the RIGHT side of the frame, centered vertically, occupying roughly 50-60% of the width. Leave the LEFT side completely empty green space. This graphic will sit beside a presenter on screen who occupies the left half.`
-  );
+  if (!isSubi && opts.hasCharacter) {
+    parts.push(CHARACTER_MODIFIER);
+  }
+
+  if (isSubi) {
+    parts.push(SUBISHOP_STYLE);
+    parts.push(
+      `Compose the subject centered within the 16:9 frame, leaving plenty of clean, solid, flat space around the borders. This graphic will appear full-screen on a video.`
+    );
+  } else {
+    parts.push(FOUNDERSFRAME_STYLE);
+    parts.push(
+      `Compose the subject on the RIGHT side of the frame, centered vertically, occupying roughly 50-60% of the width. Leave the LEFT side completely empty green space. This graphic will sit beside a presenter on screen who occupies the left half.`
+    );
+  }
 
   return parts.join("\n\n");
 }
