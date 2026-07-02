@@ -14,7 +14,7 @@ import ResultsStep from "@/components/steps/ResultsStep";
 import { Scene, ImgState, ImageModel } from "@/components/types";
 
 const SESSION_KEY = "ff_session";
-const TOKEN_RE = /^[a-f0-9]{32}$/;
+const TOKEN_RE = /^\d+\.[a-f0-9]{64}$/;
 
 function readSession(): string | null {
   if (typeof window === "undefined") return null;

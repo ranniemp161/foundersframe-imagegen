@@ -12,7 +12,7 @@ function sleep(ms: number) {
 
 export async function POST(req: NextRequest) {
   try {
-    if (!isAuthorized(req)) {
+    if (!(await isAuthorized(req))) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

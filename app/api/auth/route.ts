@@ -1,15 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { signToken } from "@/lib/auth";
 
 export const runtime = "edge";
-
-// Generate a random 32-character hex token (16 random bytes).
-function makeToken(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -27,8 +19,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Incorrect password" }, { status: 401 });
     }
 
-    return NextResponse.json({ token: makeToken() });
+    // Set token expiration to 24 hours from now
+    const expiryMs = Date.now() + 24 * 60 * 60 * 1000;
+    const token = await signToken(expiryMs, expected);
+
+    return NextResponse.json({ token });
   } catch {
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
 }
+

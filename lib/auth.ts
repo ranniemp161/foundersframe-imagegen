@@ -1,16 +1,69 @@
 import { NextRequest } from "next/server";
 
-// Token shape produced by /api/auth: 32 lowercase hex characters.
-const TOKEN_RE = /^[a-f0-9]{32}$/;
+// Token shape produced by /api/auth: timestamp (digits) followed by '.' and 64 hex chars (HMAC-SHA256 signature).
+export const TOKEN_RE = /^\d+\.[a-f0-9]{64}$/;
+
+async function getSigningKey(secret: string): Promise<CryptoKey> {
+  const encoder = new TextEncoder();
+  return crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+}
 
 /**
- * Lightweight request guard. The real security is the password check in
- * /api/auth — here we only verify the caller presents a well-formed token,
- * so requests without a session can't reach the upstream model APIs.
- *
- * Returns true when the request carries a valid-looking token.
+ * Sign a token using HMAC-SHA256 with the app password as secret.
  */
-export function isAuthorized(req: NextRequest): boolean {
-  const token = req.headers.get("x-ff-token");
-  return !!token && TOKEN_RE.test(token);
+export async function signToken(expiryMs: number, secret: string): Promise<string> {
+  const data = expiryMs.toString();
+  const key = await getSigningKey(secret);
+  const signatureBuffer = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(data)
+  );
+
+  const signatureArray = Array.from(new Uint8Array(signatureBuffer));
+  const signatureHex = signatureArray
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  return `${data}.${signatureHex}`;
 }
+
+/**
+ * Verify if the presented token is valid and unexpired.
+ */
+export async function verifyToken(token: string, secret: string): Promise<boolean> {
+  if (!TOKEN_RE.test(token)) return false;
+
+  const parts = token.split(".");
+  if (parts.length !== 2) return false;
+
+  const [expiryStr] = parts;
+  const expiryMs = Number(expiryStr);
+  if (isNaN(expiryMs) || expiryMs < Date.now()) {
+    return false; // Expired
+  }
+
+  const expectedToken = await signToken(expiryMs, secret);
+  return token === expectedToken;
+}
+
+/**
+ * Lightweight request guard. Verifies that the caller presents a cryptographically
+ * signed token matching our APP_PASSWORD secret.
+ */
+export async function isAuthorized(req: NextRequest): Promise<boolean> {
+  const token = req.headers.get("x-ff-token");
+  if (!token) return false;
+
+  const secret = process.env.APP_PASSWORD;
+  if (!secret) return false;
+
+  return verifyToken(token, secret);
+}
+

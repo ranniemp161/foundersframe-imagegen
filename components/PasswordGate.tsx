@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { IconEye, IconEyeOff } from "./Icons";
 
-const TOKEN_RE = /^[a-f0-9]{32}$/;
+const TOKEN_RE = /^\d+\.[a-f0-9]{64}$/;
 
 interface PasswordGateProps {
   onUnlock: (token: string) => void;
